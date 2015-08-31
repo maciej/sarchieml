@@ -18,7 +18,7 @@ class ArchieParserSpec extends FunSpec {
       "foo: a\n\\abcd" -> JsObject("foo" -> JsString("a\nabcd"))
     )
 
-    testParser(ArchieParser.kvLine(Context.Initial), ValidKvLines, "should parse a valid key-value line")
+    testParser(ArchieParser.kvLine(Ctx.Initial), ValidKvLines, "should parse a valid key-value line")
   }
 
   describe("Text line parser") {
