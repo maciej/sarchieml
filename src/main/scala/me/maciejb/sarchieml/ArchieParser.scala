@@ -6,7 +6,7 @@ import fastparse.Implicits.Repeater
 import fastparse.all._
 import spray.json.{JsNumber, JsObject, JsString, JsValue}
 
-import scala.collection.mutable
+import scala.language.implicitConversions
 
 /*
  * Not used, as apparently ArchieML does not support number types
@@ -30,7 +30,6 @@ trait CommonParsers {
 
   lazy val tokenName: Parser[String] = tokenChars.rep(1).!.map(t => t)
   lazy val tokenParts: Parser[Seq[String]] = P(tokenChars.!.rep(sep = ".", min = 0))
-  lazy val tokenPart: Parser[String] = P("." ~ tokenChars.!)
 }
 
 object ArchieParser extends CommonParsers {
@@ -57,58 +56,70 @@ object ArchieParser extends CommonParsers {
           }
       }
     }
-
-    private def asMutableMap[K, V](map: Map[K, V]): mutable.LinkedHashMap[K, V] = map match {
-      case m: mutable.LinkedHashMap[K, V] => m
-      case _ => mutable.LinkedHashMap(map.toSeq: _*)
-    }
-
   }
 
-  @deprecated("Use parts and value approach", "2015-08-31")
-  def objKeyedByParts(k: Seq[String], v: JsValue): JsObject = {
-    def buildUp(ks: List[String]): JsObject = ks match {
-      case head :: Nil => JsObject(head -> v)
-      case head :: tail => JsObject(head -> buildUp(tail))
-      case Nil => JsObject.empty
-    }
-    buildUp(k.toList)
-  }
-
-  def kvPairToJsObject(p: (String, JsValue)) = JsObject(p)
-
-  lazy val keyToken: P[String] =
-    P(tokenName ~ ":" | ":" ~ tokenName | "{" ~ tokenName ~ "}" | "[" ~ tokenName ~ "]")
-      .filter(t => !SpecialTokens.contains(t))
-
-  lazy val allTokens: P[String] =
-    P(tokenName ~ ":" | ":" ~ tokenName | "{" ~ tokenName ~ "}" | "[" ~ tokenName ~ "]")
-
-  lazy val token: P[Token] = P(allTokens.map(t => Key(t)) |
-    "{}".!.map(_ => EmptyToken) | "[]".!.map(_ => EmptyToken) | "*".!.map(_ => EmptyToken))
-
-  lazy val scopeLine = P(space.? ~ "{" ~ tokenParts ~ "}" ~ space.?)
-  lazy val resetScopeLine = P(space.? ~ "{" ~ space.? ~ "}")
-  lazy val textLine = P(!(resetScopeLine | scopeLine) ~
+  lazy val scopeText = P(space.? ~ "{" ~ tokenParts ~ "}" ~ space.?)
+  lazy val resetScopeText = P(space.? ~ "{" ~ space.? ~ "}")
+  lazy val text = P(!(resetScopeText | scopeText) ~
     CharsWhile(pred = !"\n".contains(_: Char), min = 0)).map(_ => JsObject.empty)
 
   lazy val multilineStr = P(strChars.!.rep(sep = "\n\\", min = 0)).map(strSeq => strSeq.mkString("\n"))
 
-  lazy val kvLine = P(space.? ~ tokenChars.! ~ (kvLineKeyPart | kvLineValue)).map(kvPairToJsObject)
-  lazy val kvLineKeyPart: P[JsObject] = P(tokenPart ~ (kvLineKeyPart | kvLineValue)).map(kvPairToJsObject)
-  lazy val kvLineValue = P(space.? ~ ":" ~ space.? ~ multilineStr).map(JsString(_))
+  def kvLine(context: Context) = P(space.? ~ tokenParts ~ space.? ~ ":" ~ space.? ~ multilineStr).map { case (tp, v) =>
+    if (v == "value") println(context)
+    context.jsObj(tp, JsString(v))
+  }
 
-  lazy val resetScope = P(resetScopeLine ~ "\n" ~ lineR)
+  def resetScope(context: Context) = P(resetScopeText ~ "\n").flatMap { _ => line(context.scopePopped) }
 
-  lazy val scope: P[JsObject] = P(space.? ~ "{" ~ tokenChars.! ~ (scopeKeyPart | scopeValue)).map(kvPairToJsObject)
-  lazy val scopeKeyPart: P[JsObject] = P(tokenPart ~ (scopeKeyPart | scopeValue)).map(kvPairToJsObject)
-  lazy val scopeValue: P[JsObject] = P(space.? ~ "}" ~ "\n" ~ lineR)
+  def scope(context: Context): P[JsObject] = P(space.? ~ "{" ~ tokenParts ~ space.? ~ "}\n").flatMap { tp =>
+    line(context.scopePushed(Path.fromTP(tp)))
+  }
 
-  lazy val line: P[JsObject] = P(kvLine | textLine)
-  lazy val lineR = line.rep(sep = "\n", min = 0)
+  def line(context: Context): P[JsObject] =
+    P(resetScope(context) | scope(context) | kvLine(context) | text).rep(sep = "\n", min = 0)
 
-  lazy val archieml = (scope | resetScope | line).rep(sep = "\n", min = 0) ~ End
+  lazy val archieml = line(Context.Initial) ~ End
 
+}
+
+case class Context(scopeStack: List[Path] = Nil) {
+  def scopePopped = scopeStack match {
+    case Nil => this
+    case _ => copy(scopeStack = scopeStack.tail)
+  }
+
+  def scopePushed(p: Path) = copy(scopeStack = p :: scopeStack)
+
+  def contextualPath(tp: Seq[String]) = scopeStack.headOption match {
+    case None => Path.fromTP(tp)
+    case Some(path) => path.merged(tp)
+  }
+
+  def jsObj(tp: Seq[String], v: JsValue) = contextualPath(tp).jsObj(v)
+
+}
+
+object Context {
+  val Initial = Context()
+}
+
+case class Path(elements: List[String]) {
+  def merged(tp: Seq[String]) = Path(elements ::: tp.toList)
+
+  def jsObj(v: JsValue): JsObject = {
+    def buildUp(e: List[String], v: JsValue): JsObject = e match {
+      case Nil => sys.error("")
+      case head :: Nil => JsObject(head -> v)
+      case head :: tail => buildUp(tail, JsObject(head -> v))
+    }
+    buildUp(elements.reverse, v)
+  }
+
+}
+
+object Path {
+  def fromTP(elements: Seq[String]): Path = Path(elements.toList)
 }
 
 sealed trait Token

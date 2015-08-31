@@ -18,7 +18,7 @@ class ArchieParserSpec extends FunSpec {
       "foo: a\n\\abcd" -> JsObject("foo" -> JsString("a\nabcd"))
     )
 
-    testParser(ArchieParser.kvLine, ValidKvLines, "should parse a valid key-value line")
+    testParser(ArchieParser.kvLine(Context.Initial), ValidKvLines, "should parse a valid key-value line")
   }
 
   describe("Text line parser") {
@@ -30,8 +30,8 @@ class ArchieParserSpec extends FunSpec {
       /* That's an empty scope */ "{}"
     )
 
-    testParser(ArchieParser.textLine, ValidTextLines, "should parse a valid text line")
-    testParserAgainstInvalidLines(ArchieParser.textLine, InvalidTextLines, "should not parse and invalid text line")
+    testParser(ArchieParser.text, ValidTextLines, "should parse a valid text line")
+    testParserAgainstInvalidLines(ArchieParser.text, InvalidTextLines, "should not parse and invalid text line")
   }
 
 
