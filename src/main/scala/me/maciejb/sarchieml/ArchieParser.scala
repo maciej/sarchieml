@@ -53,6 +53,7 @@ object ArchieParser extends CommonParsers {
             case (Some(internal: JsObject), v2o: JsObject) =>
               JsObject(f1.tail + (k -> mergeJsObjects(internal, v2o)))
             case (Some(internal: JsObject), _) => JsObject(f1.tail + (k -> v2))
+            //            case (Some(_), arr2: JsArray) if arr2.elements.isEmpty => mergeJsObjects(JsObject(f1), JsObject(f2.tail))
             case (_, _) => mergeJsObjects(JsObject(f1 + (k -> v2)), JsObject(f2.tail))
           }
       }
@@ -76,12 +77,15 @@ object ArchieParser extends CommonParsers {
     line(context.scopePushed(Path.fromTP(tp)))
   }
 
-  def array(context: Context): P[JsObject] = PL("[" ~ space.? ~ tokenParts ~ space.? ~ "]").map { tp =>
-    context.jsObj(tp, JsArray.empty)
-  }
+  def array(context: Context): P[JsObject] =
+    (PL("[" ~ space.? ~ tokenParts ~ space.? ~ "]") ~ line(context) ~ resetArray.?).map { case (tp, _) =>
+      context.jsObj(tp, JsArray.empty)
+    }
+
+  lazy val resetArray: P[Unit] = PL("[" ~ space.? ~ "]")
 
   def line(context: Context): P[JsObject] =
-    P(scope(context) | resetScope(context) | kvLine(context) | text).rep(sep = "\n", min = 0)
+    P(scope(context) | resetScope(context) | array(context) | kvLine(context) | text).rep(sep = "\n", min = 0)
 
   lazy val archieml = line(Context.Initial) ~ End
 
