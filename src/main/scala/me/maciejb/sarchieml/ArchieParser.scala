@@ -4,7 +4,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 import fastparse.Implicits.Repeater
 import fastparse.all._
-import spray.json.{JsNumber, JsObject, JsString, JsValue}
+import spray.json._
 
 import scala.language.implicitConversions
 
@@ -28,11 +28,12 @@ trait CommonParsers {
   lazy val tokenChars =
     (CharPred(c => CharPredicates.isLetter(c) || CharPredicates.isDigit(c)) | CharIn("_-")).rep(1)
 
-  lazy val tokenName: Parser[String] = tokenChars.rep(1).!.map(t => t)
-  lazy val tokenParts: Parser[Seq[String]] = P(tokenChars.!.rep(sep = ".", min = 0))
+  lazy val tokenName: Parser[String] = tokenChars.rep(1).!
+  lazy val tokenParts: Parser[Seq[String]] = P(tokenChars.!.rep(sep = ".", min = 1))
 }
 
 object ArchieParser extends CommonParsers {
+  def PL[V](p: P[V]) = P(space.? ~ p ~ space.? ~ "\n")
 
   val SpecialTokens = Seq("skip", "endskip", "end", "ignore")
 
@@ -66,18 +67,21 @@ object ArchieParser extends CommonParsers {
   lazy val multilineStr = P(strChars.!.rep(sep = "\n\\", min = 0)).map(strSeq => strSeq.mkString("\n"))
 
   def kvLine(context: Context) = P(space.? ~ tokenParts ~ space.? ~ ":" ~ space.? ~ multilineStr).map { case (tp, v) =>
-    if (v == "value") println(context)
     context.jsObj(tp, JsString(v))
   }
 
   def resetScope(context: Context) = P(resetScopeText ~ "\n").flatMap { _ => line(context.scopePopped) }
 
-  def scope(context: Context): P[JsObject] = P(space.? ~ "{" ~ tokenParts ~ space.? ~ "}\n").flatMap { tp =>
+  def scope(context: Context): P[JsObject] = P(space.? ~ "{" ~ space.? ~ tokenParts ~ space.? ~ "}\n").flatMap { tp =>
     line(context.scopePushed(Path.fromTP(tp)))
   }
 
+  def array(context: Context): P[JsObject] = PL("[" ~ space.? ~ tokenParts ~ space.? ~ "]").map { tp =>
+    context.jsObj(tp, JsArray.empty)
+  }
+
   def line(context: Context): P[JsObject] =
-    P(resetScope(context) | scope(context) | kvLine(context) | text).rep(sep = "\n", min = 0)
+    P(scope(context) | resetScope(context) | kvLine(context) | text).rep(sep = "\n", min = 0)
 
   lazy val archieml = line(Context.Initial) ~ End
 
@@ -91,11 +95,14 @@ case class Context(scopeStack: List[Path] = Nil) {
 
   def scopePushed(p: Path) = copy(scopeStack = p :: scopeStack)
 
-  def contextualPath(tp: Seq[String]) = scopeStack.headOption match {
-    case None => Path.fromTP(tp)
-    case Some(path) => path.merged(tp)
+  def contextualPath(tp: Seq[String]): Path = contextualPath(Path.fromTP(tp))
+
+  def contextualPath(path: Path): Path = scopeStack.headOption match {
+    case None => path
+    case Some(thatPath) => path.merged(thatPath)
   }
 
+  def jsObj(path: Path, v: JsValue) = contextualPath(path).jsObj(v)
   def jsObj(tp: Seq[String], v: JsValue) = contextualPath(tp).jsObj(v)
 
 }
@@ -105,7 +112,7 @@ object Context {
 }
 
 case class Path(elements: List[String]) {
-  def merged(tp: Seq[String]) = Path(elements ::: tp.toList)
+  def merged(path: Path) = Path(path.elements ::: elements)
 
   def jsObj(v: JsValue): JsObject = {
     def buildUp(e: List[String], v: JsValue): JsObject = e match {
