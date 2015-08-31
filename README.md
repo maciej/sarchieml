@@ -1,4 +1,5 @@
 # SArchieML
+[![Build Status](https://travis-ci.org/maciej/sarchieml.svg)](https://travis-ci.org/maciej/sarchieml)
 
 A Scala parser for [ArchieML](http://archieml.org). Uses [fastparse](http://lihaoyi.github.io/fastparse/) parser generator.
 
