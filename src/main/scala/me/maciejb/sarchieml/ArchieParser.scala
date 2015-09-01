@@ -15,7 +15,7 @@ trait CommonParsers {
     (CharPred(c => CharPredicates.isLetter(c) || CharPredicates.isDigit(c)) | CharIn("_-")).rep(1)
 
   lazy val tokenName: Parser[String] = tokenChars.rep(1).!
-  lazy val tokenParts: Parser[Seq[String]] = P(tokenChars.!.rep(sep = ".", min = 1))
+  lazy val tokenPath: Parser[Path] = P(tokenChars.!.rep(sep = ".", min = 1)) map Path.fromTP
 
   lazy val ws = space.?
 }
@@ -38,19 +38,25 @@ object Js {
   }
 }
 
+case class FlattenJsObject(fields: Map[String, JsValue]) {
+  def toJsObj = JsObject(fields)
+}
+
 object ArchieParser extends CommonParsers {
+
   def PL[V](p: P[V]) = P(space.? ~ p ~ space.? ~ "\n")
 
   val SpecialTokens = Seq("skip", "endskip", "end", "ignore")
 
-  def liftParserToJsString(p: P[String]): P[JsString] = p.map(JsString.apply)
-  //  def liftParserToJsObject(p: P[Unit]): P[JsObject] = p.map(_ => JsObject.empty)
-
-  implicit val jsObjectRepeater = new Repeater[JsObject, JsObject] {
+  val jsObjectRepeater = new Repeater[Any, JsObject] {
     override type Acc = AtomicReference[JsObject]
     override def result(acc: Acc) = acc.get()
     override def initial = new AtomicReference(JsObject.empty)
-    override def accumulate(t: JsObject, acc: Acc) = acc.set(Js.mergeObjects(acc.get(), t))
+    override def accumulate(n: Any, acc: Acc) = n match {
+      case t: FlattenJsObject => acc.set(JsObject(acc.get().fields ++ t.fields))
+      case t: JsObject => acc.set(Js.mergeObjects(acc.get(), t))
+      case _ => sys.error("should not happen")
+    }
   }
 
   val jsArrayRepeater = new Repeater[JsValue, JsArray] {
@@ -75,27 +81,44 @@ object ArchieParser extends CommonParsers {
     }
   }
 
-  lazy val scopeText = P(ws ~ "{" ~ tokenParts ~ "}" ~ ws)
-  lazy val resetScopeText = P(ws ~ "{" ~ ws ~ "}")
-  lazy val resetArrayText = P(ws ~ "[" ~ ws ~ "]" ~ ws)
+  lazy val scopeMarker: P[Unit] = P(ws ~ "{" ~ tokenPath ~ "}" ~ ws).map(_ => ())
+  lazy val resetScopeMarker = P(ws ~ "{" ~ ws ~ "}" ~ ws)
+  lazy val resetArrayMarker = P(ws ~ "[" ~ ws ~ "]" ~ ws)
+  lazy val subArrayMarker = P("[." ~ tokenChars ~ "]" ~ ws ~ "\n")
+  lazy val markers = P(scopeMarker | resetScopeMarker | resetArrayMarker | subArrayMarker)
 
   def textExcluding(exl: P[Any]) = P(!exl ~ rawText).rep(0, "\n") ~ "\n".?
+  def textLineExcluding(exl: P[Any]) = P(!exl ~ rawText).log("tle")
   lazy val rawText = CharsWhile(pred = !"\n".contains(_: Char), min = 0)
-  lazy val textAsJArr = P(!(resetScopeText | scopeText | resetArrayText) ~ rawText).map(_ => JsArray.empty)
-  lazy val text = P(!(resetScopeText | scopeText | resetArrayText) ~ rawText).map(_ => JsObject.empty)
+  lazy val textAsJArr = P(!(resetScopeMarker | scopeMarker | resetArrayMarker) ~ rawText).map(_ => JsArray.empty)
+  lazy val anyText = P(rawText).map(_ => JsObject.empty)
+
+  lazy val kvLine: P[JsObject] =
+    P(ws ~ tokenPath ~ ws ~ ":" ~ ws ~ multilineStr).log("kvLine").map { case (p, v) => p.jsObj(JsString(v)) }
 
   lazy val multilineStr = P(strChars.!.rep(sep = "\n\\", min = 0)).map(strSeq => strSeq.mkString("\n"))
 
-  def kvLine(ctx: Ctx = Ctx.Initial): P[JsObject] =
-    P(space.? ~ tokenParts ~ space.? ~ ":" ~ space.? ~ multilineStr).map { case (tp, v) =>
-      ctx.jsObj(tp, JsString(v))
+  lazy val scope: P[JsObject] =
+    P(ws ~ "{" ~ ws ~ tokenPath ~ ws ~ "}" ~ ws ~ "\n").log("scope").flatMap(scopeContent)
+
+  def scopeContent(path: Path): P[JsObject] =
+    P((kvLine | array | scope.map(o => FlattenJsObject(o.fields))
+      | textLineExcluding(resetScopeMarker)).rep(0, "\n")
+      ~ (("\n" ~ resetScopeMarker ~ "\n".?) | End)).log("scopeContent").map { seq =>
+      seq.foldLeft(JsObject.empty) {
+        case (acc, jsObj: JsObject) => Js.mergeObjects(acc, path.jsObj(jsObj))
+        case (acc, scopeObj: FlattenJsObject) => Js.mergeObjects(acc, scopeObj.toJsObj)
+        case (acc, _) => acc
+      }
     }
 
-  def resetScope(ctx: Ctx) = P(resetScopeText ~ "\n").flatMap { _ => line(ctx.scopePopped) }
-
-  def scope(ctx: Ctx): P[JsObject] = P(ws ~ "{" ~ ws ~ tokenParts ~ ws ~ "}\n").flatMap { tp =>
-    line(ctx.scopePushed(Path.fromTP(tp)))
-  }
+  lazy val array: P[JsObject] =
+    (PL("[" ~ space.? ~ tokenPath ~ space.? ~ "]") ~ textExcluding(arrayStringLine | kvLine
+      | resetArrayMarker | subArrayMarker)
+      ~ arrayLines.? ~ ("\n".? ~ resetArrayMarker).?).log("array").map {
+      case (path, Some(arr)) => path.jsObj(arr)
+      case (path, None) => path.jsObj(JsArray.empty)
+    }
 
   lazy val arrayLines: P[JsArray] = P((subArray | (arrayStringLine ~ "\n" ~ stringArray.?) | kvArray) ~ "\n".?).
     log("arrayLines").map {
@@ -106,11 +129,12 @@ object ArchieParser extends CommonParsers {
     case _ => JsArray.empty
   }
 
-  lazy val kvArray: P[JsArray] = P(subArray | kvLine(Ctx.InArray) | textAsJArr).rep(1, "\n")(jsArrayRepeater).
+  lazy val kvArray: P[JsArray] = P(subArray | kvLine | textAsJArr).rep(1, "\n")(jsArrayRepeater).
     log("kvArray")
   lazy val stringArray: P[JsArray] = P(subArray | arrayStringLine | textAsJArr).log("stringArray")
     .rep(1, "\n")(jsArrayRepeater)
-  lazy val arrayStringLine: P[JsString] = liftParserToJsString(P(ws ~ "*" ~ ws ~ strChars.! ~ ws))
+  lazy val arrayStringLine: P[JsString] = P(ws ~ "*" ~ ws ~ strChars.! ~ ws).map(JsString.apply)
+
   lazy val subArray: P[JsObject] = P("[." ~ tokenChars.! ~ "]" ~ ws ~ "\n").log("subArray").
     flatMap { sc => subArrayContent(sc) }
 
@@ -119,53 +143,11 @@ object ArchieParser extends CommonParsers {
     case None => JsObject(scope -> JsArray.empty)
   }
 
-  lazy val subArrayMarkerLine = P("[." ~ tokenChars ~ "]" ~ ws ~ "\n")
+  lazy val archieml = P(kvLine | scope | array | anyText).rep(0, "\n")(jsObjectRepeater) ~ End
 
-  def array(ctx: Ctx): P[JsObject] =
-    (PL("[" ~ space.? ~ tokenParts ~ space.? ~ "]") ~ textExcluding(arrayStringLine | kvLine(ctx)
-      | resetArrayText | subArrayMarkerLine)
-      ~ arrayLines.? ~ ("\n".? ~ resetArrayMarker).?).log("array").map {
-      case (tp, Some(arr)) => ctx.jsObj(tp, arr)
-      case (tp, None) => ctx.jsObj(tp, JsArray.empty)
-    }
-
-  lazy val resetArrayMarker: P[Unit] = PL("[" ~ space.? ~ "]")
-
-  def line(ctx: Ctx): P[JsObject] =
-    P(scope(ctx) | resetScope(ctx) | array(ctx) | kvLine(ctx) | text).rep(0, "\n")
-
-  lazy val archieml = line(Ctx.Initial) ~ End
-
-}
-
-case class Ctx(scopeStack: List[Path] = Nil) {
-  def scopePopped = scopeStack match {
-    case Nil => this
-    case _ => copy(scopeStack = scopeStack.tail)
-  }
-
-  def scopePushed(p: Path) = copy(scopeStack = p :: scopeStack)
-
-  def contextualPath(tp: Seq[String]): Path = contextualPath(Path.fromTP(tp))
-
-  def contextualPath(path: Path): Path = scopeStack.headOption match {
-    case None => path
-    case Some(thatPath) => path.merged(thatPath)
-  }
-
-  def jsObj(path: Path, v: JsValue) = contextualPath(path).jsObj(v)
-  def jsObj(tp: Seq[String], v: JsValue) = contextualPath(tp).jsObj(v)
-
-}
-
-object Ctx {
-  val Initial = Ctx()
-  val InArray = Ctx()
 }
 
 case class Path(elements: List[String]) {
-  def merged(path: Path) = Path(path.elements ::: elements)
-
   def jsObj(v: JsValue): JsObject = {
     def buildUp(e: List[String], v: JsValue): JsObject = e match {
       case Nil => sys.error("")

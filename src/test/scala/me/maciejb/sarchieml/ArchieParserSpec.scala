@@ -18,22 +18,8 @@ class ArchieParserSpec extends FunSpec {
       "foo: a\n\\abcd" -> JsObject("foo" -> JsString("a\nabcd"))
     )
 
-    testParser(ArchieParser.kvLine(Ctx.Initial), ValidKvLines, "should parse a valid key-value line")
+    testParser(ArchieParser.kvLine, ValidKvLines, "should parse a valid key-value line")
   }
-
-  describe("Text line parser") {
-    def ValidTextLines = Seq(
-      "That's basically anything" -> JsObject.empty
-    )
-
-    val InvalidTextLines = Seq(
-      /* That's an empty scope */ "{}"
-    )
-
-    testParser(ArchieParser.text, ValidTextLines, "should parse a valid text line")
-    testParserAgainstInvalidLines(ArchieParser.text, InvalidTextLines, "should not parse and invalid text line")
-  }
-
 
   def testParser[V](parser: Parser[V], testData: Seq[(String, V)], testDesc: String) = {
     for ((text, expectedResult) <- testData) {
