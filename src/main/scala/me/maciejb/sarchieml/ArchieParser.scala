@@ -97,17 +97,19 @@ object ArchieParser extends CommonParsers {
     line(ctx.scopePushed(Path.fromTP(tp)))
   }
 
-  lazy val arrayLines: P[JsArray] = P(subArray | (arrayStringLine ~ "\n" ~ stringArray) | kvArray
-  ).log("arrayLines").map {
+  lazy val arrayLines: P[JsArray] = P((subArray | (arrayStringLine ~ "\n" ~ stringArray.?) | kvArray) ~ "\n".?).
+    log("arrayLines").map {
     case jObj: JsObject => JsArray(jObj)
     case jArr: JsArray => jArr
-    case (jv: JsValue, jArr: JsArray) => JsArray(jv +: jArr.elements)
+    case (jv: JsValue, Some(jArr: JsArray)) => JsArray(jv +: jArr.elements)
+    case (jv: JsValue, None) => JsArray(jv)
     case _ => JsArray.empty
   }
 
   lazy val kvArray: P[JsArray] = P(subArray | kvLine(Ctx.InArray) | textAsJArr).rep(1, "\n")(jsArrayRepeater).
     log("kvArray")
-  lazy val stringArray: P[JsArray] = P(subArray | arrayStringLine | textAsJArr).rep(1, "\n")(jsArrayRepeater)
+  lazy val stringArray: P[JsArray] = P(subArray | arrayStringLine | textAsJArr).log("stringArray")
+    .rep(1, "\n")(jsArrayRepeater)
   lazy val arrayStringLine: P[JsString] = liftParserToJsString(P(ws ~ "*" ~ ws ~ strChars.! ~ ws))
   lazy val subArray: P[JsObject] = P("[." ~ tokenChars.! ~ "]" ~ ws ~ "\n").log("subArray").
     flatMap { sc => subArrayContent(sc) }
