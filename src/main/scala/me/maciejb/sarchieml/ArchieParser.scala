@@ -88,7 +88,7 @@ object ArchieParser extends CommonParsers {
   lazy val markers = P(scopeMarker | resetScopeMarker | resetArrayMarker | subArrayMarker)
 
   def textExcluding(exl: P[Any]) = P(!exl ~ rawText).rep(0, "\n") ~ "\n".?
-  def textLineExcluding(exl: P[Any]) = P(!exl ~ rawText).log("tle")
+  def tle(exl: P[Any]) = P(!exl ~ rawText).log("tle")
   lazy val rawText = CharsWhile(pred = !"\n".contains(_: Char), min = 0)
   lazy val textAsJArr = P(!(resetScopeMarker | scopeMarker | resetArrayMarker) ~ rawText).map(_ => JsArray.empty)
   lazy val anyText = P(rawText).map(_ => JsObject.empty)
@@ -103,7 +103,7 @@ object ArchieParser extends CommonParsers {
 
   def scopeContent(path: Path): P[JsObject] =
     P((kvLine | array | scope.map(o => FlattenJsObject(o.fields))
-      | textLineExcluding(resetScopeMarker)).rep(0, "\n")
+      | tle(resetScopeMarker)).rep(0, "\n")
       ~ (("\n" ~ resetScopeMarker ~ "\n".?) | End)).log("scopeContent").map { seq =>
       seq.foldLeft(JsObject.empty) {
         case (acc, jsObj: JsObject) => Js.mergeObjects(acc, path.jsObj(jsObj))
@@ -144,16 +144,18 @@ object ArchieParser extends CommonParsers {
 
   lazy val freeformArray = P(ws ~ "[+" ~ ws ~ tokenPath ~ ws ~ "]" ~ ws ~ "\n").log("freeformArray")
     .flatMap(freeformArrayContent)
-  def freeformArrayContent(p: Path) = P(("\n".? ~ (kvFfArrLine | textExcluding(resetArrayMarker))).rep(0, "\n") ~ "\n".? ~
+  def freeformArrayContent(p: Path) = P(("\n".? ~ (kvFfArrLine | textFfArrLine)).rep(0, "\n") ~ "\n".? ~
     (resetArrayMarker | End)).map { lines =>
     val list = lines.foldLeft(List[JsObject]()) {
       case (acc, (k: String, v: String)) => JsObject("type" -> JsString(k), "value" -> JsString(v)) :: acc
+      case (acc, t: String) if !t.isEmpty => JsObject("type" -> JsString("text"), "value" -> JsString(t)) :: acc
       case (acc, _) => acc
     }
     p.jsObj(JsArray(list.reverse.toVector))
   }
 
   lazy val kvFfArrLine: P[(String, String)] = P(ws ~ tokenChars.! ~ ws ~ ":" ~ ws ~ rawText.!).log("kvFfArrLine")
+  lazy val textFfArrLine: P[String] = P(ws ~ tle(resetArrayMarker).! ~ ws)
 
   lazy val archieml = P(kvLine | scope | array | freeformArray | anyText).rep(0, "\n")(jsObjectRepeater) ~ End
 
