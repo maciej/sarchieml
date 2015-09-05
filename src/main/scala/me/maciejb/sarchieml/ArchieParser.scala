@@ -112,21 +112,17 @@ object ArchieParser extends CommonParsers {
       }
     }
 
-  lazy val array: P[JsObject] =
-    (PL("[" ~ space.? ~ tokenPath ~ space.? ~ "]") ~ textExcluding(arrayStringLine | kvLine
-      | resetArrayMarker | subArrayMarker)
-      ~ arrayLines.? ~ ("\n".? ~ resetArrayMarker).?).log("array").map {
-      case (path, Some(arr)) => path.jsObj(arr)
-      case (path, None) => path.jsObj(JsArray.empty)
+  lazy val array: P[JsObject] = P(ws ~ "[" ~ ws ~ tokenPath ~ ws ~ "]" ~ ws ~ "\n").log("array").flatMap(arrayContent)
+  def arrayContent(p: Path) = P((subArray | (arrayStringLine ~ "\n" ~ stringArray.?) | kvArray).?
+    ~ "\n".? ~ (resetArrayMarker | End)).map { r =>
+    val arr = r match {
+      case Some(jObj: JsObject) => JsArray(jObj)
+      case Some(jArr: JsArray) => jArr
+      case Some((jv: JsValue, Some(jArr: JsArray))) => JsArray(jv +: jArr.elements)
+      case Some((jv: JsValue, None)) => JsArray(jv)
+      case _ => JsArray.empty
     }
-
-  lazy val arrayLines: P[JsArray] = P((subArray | (arrayStringLine ~ "\n" ~ stringArray.?) | kvArray) ~ "\n".?).
-    log("arrayLines").map {
-    case jObj: JsObject => JsArray(jObj)
-    case jArr: JsArray => jArr
-    case (jv: JsValue, Some(jArr: JsArray)) => JsArray(jv +: jArr.elements)
-    case (jv: JsValue, None) => JsArray(jv)
-    case _ => JsArray.empty
+    p.jsObj(arr)
   }
 
   lazy val kvArray: P[JsArray] = P(subArray | kvLine | textAsJArr).rep(1, "\n")(jsArrayRepeater).
@@ -135,12 +131,7 @@ object ArchieParser extends CommonParsers {
     .rep(1, "\n")(jsArrayRepeater)
   lazy val arrayStringLine: P[JsString] = P(ws ~ "*" ~ ws ~ strChars.! ~ ws).map(JsString.apply)
 
-  lazy val subArray: P[JsObject] = P("[." ~ tokenChars.! ~ "]" ~ ws ~ "\n").log("subArray").flatMap(subArrayContent)
-
-  def subArrayContent(scope: String): P[JsObject] = P(arrayLines.? ~ (resetArrayMarker | End)).log("subArrayContent") map {
-    case Some(arr) => JsObject(scope -> arr)
-    case None => JsObject(scope -> JsArray.empty)
-  }
+  lazy val subArray: P[JsObject] = P("[." ~ tokenPath ~ "]" ~ ws ~ "\n").log("subArray").flatMap(arrayContent)
 
   lazy val freeformArray = P(ws ~ "[+" ~ ws ~ tokenPath ~ ws ~ "]" ~ ws ~ "\n").log("freeformArray")
     .flatMap(freeformArrayContent)
@@ -158,8 +149,8 @@ object ArchieParser extends CommonParsers {
   lazy val textFfArrLine: P[String] = P(ws ~ tle(resetArrayMarker).! ~ ws)
 
   lazy val archieml = P(kvLine | scope | array | freeformArray | anyText).rep(0, "\n")(jsObjectRepeater) ~ End
-
 }
+
 
 case class Path(elements: List[String]) {
   def jsObj(v: JsValue): JsObject = {
