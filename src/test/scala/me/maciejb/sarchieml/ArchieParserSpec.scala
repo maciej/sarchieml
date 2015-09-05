@@ -14,8 +14,7 @@ class ArchieParserSpec extends FunSpec {
     def ValidKvLines = Seq(
       "foo: 1" -> JsObject("foo" -> JsString("1")),
       "bar: -20" -> JsObject("bar" -> JsString("-20")),
-      "foo: abcd" -> JsObject("foo" -> JsString("abcd")),
-      "foo: a\n\\abcd" -> JsObject("foo" -> JsString("a\nabcd"))
+      "foo: abcd" -> JsObject("foo" -> JsString("abcd"))
     )
 
     testParser(ArchiemlParsers.kvLine, ValidKvLines, "should parse a valid key-value line")
