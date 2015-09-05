@@ -15,7 +15,6 @@ private[sarchieml] trait CommonParsers {
   lazy val tokenChars =
     (CharPred(c => CharPredicates.isLetter(c) || CharPredicates.isDigit(c)) | CharIn("_-")).rep(1)
 
-  lazy val tokenName: Parser[String] = tokenChars.rep(1).!
   lazy val tokenPath: Parser[Path] = P(tokenChars.!.rep(sep = ".", min = 1)) map Path.fromTP
 
   lazy val ws = space.?
@@ -51,10 +50,6 @@ private[sarchieml] object NoLoggingArchiemlParsers extends ArchiemlParsers {
 
 private[sarchieml] trait ArchiemlParsers extends CommonParsers {
   implicit val logger: Logger = Logger.stdout
-
-  def PL[V](p: P[V]) = P(space.? ~ p ~ space.? ~ "\n")
-
-  val SpecialTokens = Seq("skip", "endskip", "end", "ignore")
 
   val jsObjectRepeater = new Repeater[Any, JsObject] {
     override type Acc = AtomicReference[JsObject]
@@ -96,12 +91,11 @@ private[sarchieml] trait ArchiemlParsers extends CommonParsers {
   lazy val endOfBlockMarker = P(":end")
   lazy val markers = P(scopeMarker | resetScopeMarker | resetArrayMarker | subArrayMarker | endOfBlockMarker)
 
-  def textExcluding(exl: P[Any]) = P(!exl ~ rawText).rep(0, "\n") ~ "\n".?
   def tle(exl: P[Any]) = P(!exl ~ rawText).log("tle")
   lazy val tlm = tle(markers)
   lazy val rawText = CharsWhile(pred = !"\n".contains(_: Char), min = 0)
-  lazy val textAsJArr = P(!(resetScopeMarker | scopeMarker | resetArrayMarker) ~ rawText).map(_ => JsArray.empty)
-  lazy val anyText = P(rawText).map(_ => JsObject.empty)
+  lazy val textAsJArr = P(tlm).map(_ => JsArray.empty)
+  lazy val textAsJObj = P(rawText).map(_ => JsObject.empty)
 
   lazy val kToken = P(ws ~ tokenPath ~ ws ~ ":" ~ ws)
 
@@ -181,7 +175,7 @@ private[sarchieml] trait ArchiemlParsers extends CommonParsers {
   lazy val textFfArrLine: P[String] = P(ws ~ tle(resetArrayMarker).! ~ ws)
 
   lazy val archieml = P(kvLine | scope | blockComment
-    | array | freeformArray | anyText).rep(0, "\n")(jsObjectRepeater) ~ End
+    | array | freeformArray | textAsJObj).rep(0, "\n")(jsObjectRepeater) ~ End
 }
 
 
