@@ -18,7 +18,7 @@ class ArchieParserSpec extends FunSpec {
       "foo: a\n\\abcd" -> JsObject("foo" -> JsString("a\nabcd"))
     )
 
-    testParser(ArchieParser.kvLine, ValidKvLines, "should parse a valid key-value line")
+    testParser(ArchiemlParsers.kvLine, ValidKvLines, "should parse a valid key-value line")
   }
 
   def testParser[V](parser: Parser[V], testData: Seq[(String, V)], testDesc: String) = {

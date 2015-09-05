@@ -3,12 +3,13 @@ package me.maciejb.sarchieml
 import java.util.concurrent.atomic.AtomicReference
 
 import fastparse.Implicits.Repeater
+import fastparse.Logger
 import fastparse.all._
 import spray.json._
 
 import scala.language.implicitConversions
 
-trait CommonParsers {
+private[sarchieml] trait CommonParsers {
   lazy val space = CharsWhile(" \t".contains(_: Char))
   lazy val strChars = CharsWhile(!"\n".contains(_: Char))
   lazy val tokenChars =
@@ -20,7 +21,7 @@ trait CommonParsers {
   lazy val ws = space.?
 }
 
-object Js {
+private[sarchieml] object Js {
   def mergeObjects(j1: JsObject, j2: JsObject): JsObject = {
     val f1 = j1.fields
     val f2 = j2.fields
@@ -38,11 +39,18 @@ object Js {
   }
 }
 
-case class FlattenJsObject(fields: Map[String, JsValue]) {
+private[sarchieml] case class FlattenJsObject(fields: Map[String, JsValue]) {
   def toJsObj = JsObject(fields)
 }
 
-object ArchieParser extends CommonParsers {
+private[sarchieml] object ArchiemlParsers extends ArchiemlParsers
+
+private[sarchieml] object NoLoggingArchiemlParsers extends ArchiemlParsers {
+  override implicit val logger: Logger = NilLogger
+}
+
+private[sarchieml] trait ArchiemlParsers extends CommonParsers {
+  implicit val logger: Logger = Logger.stdout
 
   def PL[V](p: P[V]) = P(space.? ~ p ~ space.? ~ "\n")
 
@@ -177,10 +185,10 @@ object ArchieParser extends CommonParsers {
 }
 
 
-case class Path(elements: List[String]) {
+private[sarchieml] case class Path(elements: List[String]) {
   def jsObj(v: JsValue): JsObject = {
     def buildUp(e: List[String], v: JsValue): JsObject = e match {
-      case Nil => sys.error("")
+      case Nil => sys.error("This should never happen")
       case head :: Nil => JsObject(head -> v)
       case head :: tail => buildUp(tail, JsObject(head -> v))
     }
@@ -189,7 +197,7 @@ case class Path(elements: List[String]) {
 
 }
 
-object Path {
+private[sarchieml] object Path {
   def fromTP(elements: Seq[String]): Path = Path(elements.toList)
 }
 

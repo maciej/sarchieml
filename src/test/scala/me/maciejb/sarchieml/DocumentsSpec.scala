@@ -25,7 +25,7 @@ case class TestDocument(filePrefix: String) extends DefaultJsonProtocol {
 
   private[this] def archiemlParsed: JsValue = {
     val inputStr = IOUtils.toString(getClass.getClassLoader.getResource(archiemlPath), Charsets.UTF_8)
-    ArchieParser.archieml.parse(inputStr, 0) match {
+    ArchiemlParsers.archieml.parse(inputStr, 0) match {
       case Result.Success(jObj, _) => jObj
       case failure: Result.Failure => fail(s"${failure.msg}\n${failure.traceData}")
     }
