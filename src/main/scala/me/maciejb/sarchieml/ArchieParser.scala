@@ -135,15 +135,26 @@ object ArchieParser extends CommonParsers {
 
   lazy val freeformArray = P(ws ~ "[+" ~ ws ~ tokenPath ~ ws ~ "]" ~ ws ~ "\n").log("freeformArray")
     .flatMap(freeformArrayContent)
-  def freeformArrayContent(p: Path) = P((kvFfArrLine | textFfArrLine | Pass).rep(0, "\n") ~ "\n".? ~
+  def freeformArrayContent(p: Path) = P((ffSubScope | kvFfArrLine | textFfArrLine | Pass).rep(0, "\n") ~ "\n".? ~
     (resetArrayMarker | End)).map { lines =>
     val list = lines.foldLeft(List[JsObject]()) {
+      case (acc, obj: JsObject) => obj :: acc
       case (acc, (k: String, v: String)) => JsObject("type" -> JsString(k), "value" -> JsString(v)) :: acc
       case (acc, t: String) if !t.isEmpty => JsObject("type" -> JsString("text"), "value" -> JsString(t)) :: acc
       case (acc, _) => acc
     }
     p.jsObj(JsArray(list.reverse.toVector))
   }
+
+  lazy val ffSubScope: P[JsObject] = P(ws ~ "{." ~ tokenChars.! ~ ws ~ "}" ~ ws ~ "\n").flatMap(ffSubScopeContent)
+  def ffSubScopeContent(sc: String) = P((kvFfArrLine | Pass).rep(0, "\n") ~ resetScopeMarker).map { lines =>
+    val elems = lines.flatMap {
+      case (k: String, v: String) => (k -> JsString(v)) :: Nil
+      case _ => Nil
+    }
+    JsObject("type" -> JsString(sc), "value" -> JsObject(elems: _*))
+  }
+
 
   lazy val kvFfArrLine: P[(String, String)] = P(ws ~ tokenChars.! ~ ws ~ ":" ~ ws ~ rawText.!).log("kvFfArrLine")
   lazy val textFfArrLine: P[String] = P(ws ~ tle(resetArrayMarker).! ~ ws)
