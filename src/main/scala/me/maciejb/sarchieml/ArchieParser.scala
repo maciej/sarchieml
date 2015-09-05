@@ -112,7 +112,7 @@ object ArchieParser extends CommonParsers {
     P(ws ~ "{" ~ ws ~ tokenPath ~ ws ~ "}" ~ ws ~ "\n").log("scope").flatMap(scopeContent)
 
   def scopeContent(path: Path): P[JsObject] =
-    P((kvLine | array | scope.map(o => FlattenJsObject(o.fields))
+    P((kvLine | blockComment | array | scope.map(o => FlattenJsObject(o.fields))
       | tle(resetScopeMarker)).rep(0, "\n")
       ~ (("\n" ~ resetScopeMarker ~ "\n".?) | End)).log("scopeContent").map { seq =>
       seq.foldLeft(JsObject.empty) {
@@ -123,7 +123,7 @@ object ArchieParser extends CommonParsers {
     }
 
   lazy val array: P[JsObject] = P(ws ~ "[" ~ ws ~ tokenPath ~ ws ~ "]" ~ ws ~ "\n").log("array").flatMap(arrayContent)
-  def arrayContent(p: Path) = P((subArray | (arrayStringLine ~ "\n" ~ stringArray.?) | kvArray).?
+  def arrayContent(p: Path) = P((subArray | blockComment | (arrayStringLine ~ "\n" ~ stringArray.?) | kvArray).?
     ~ "\n".? ~ (resetArrayMarker | End)).map { r =>
     val arr = r match {
       case Some(jObj: JsObject) => JsArray(jObj)
@@ -135,9 +135,9 @@ object ArchieParser extends CommonParsers {
     p.jsObj(arr)
   }
 
-  lazy val kvArray: P[JsArray] = P(subArray | kvLine | textAsJArr).rep(1, "\n")(jsArrayRepeater).
+  lazy val kvArray: P[JsArray] = P(subArray | blockComment | kvLine | textAsJArr).rep(1, "\n")(jsArrayRepeater).
     log("kvArray")
-  lazy val stringArray: P[JsArray] = P(subArray | arrayStringLine | textAsJArr).log("stringArray")
+  lazy val stringArray: P[JsArray] = P(subArray | blockComment | arrayStringLine | textAsJArr).log("stringArray")
     .rep(1, "\n")(jsArrayRepeater)
   lazy val arrayStringLine: P[JsString] = P(ws ~ "*" ~ ws ~ strChars.! ~ ws).map(JsString.apply)
 
@@ -165,11 +165,15 @@ object ArchieParser extends CommonParsers {
     JsObject("type" -> JsString(sc), "value" -> JsObject(elems: _*))
   }
 
+  lazy val blockComment = P(skipBlock | ignore).log("blockComment").map(_ => JsObject.empty)
+  lazy val skipBlock = P(":skip" ~ ws ~ "\n" ~ (!":endskip" ~ strChars).rep(0, "\n") ~ "\n".? ~ (":endskip" | End))
+  lazy val ignore = P(":ignore" ~ AnyChar.rep ~ End)
 
   lazy val kvFfArrLine: P[(String, String)] = P(ws ~ tokenChars.! ~ ws ~ ":" ~ ws ~ rawText.!).log("kvFfArrLine")
   lazy val textFfArrLine: P[String] = P(ws ~ tle(resetArrayMarker).! ~ ws)
 
-  lazy val archieml = P(kvLine | scope | array | freeformArray | anyText).rep(0, "\n")(jsObjectRepeater) ~ End
+  lazy val archieml = P(kvLine | scope | blockComment
+    | array | freeformArray | anyText).rep(0, "\n")(jsObjectRepeater) ~ End
 }
 
 
