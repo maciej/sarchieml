@@ -85,18 +85,28 @@ object ArchieParser extends CommonParsers {
   lazy val resetScopeMarker = P(ws ~ "{" ~ ws ~ "}" ~ ws)
   lazy val resetArrayMarker = P(ws ~ "[" ~ ws ~ "]" ~ ws)
   lazy val subArrayMarker = P("[." ~ tokenChars ~ "]" ~ ws ~ "\n")
-  lazy val markers = P(scopeMarker | resetScopeMarker | resetArrayMarker | subArrayMarker)
+  lazy val endOfBlockMarker = P(":end")
+  lazy val markers = P(scopeMarker | resetScopeMarker | resetArrayMarker | subArrayMarker | endOfBlockMarker)
 
   def textExcluding(exl: P[Any]) = P(!exl ~ rawText).rep(0, "\n") ~ "\n".?
   def tle(exl: P[Any]) = P(!exl ~ rawText).log("tle")
+  lazy val tlm = tle(markers)
   lazy val rawText = CharsWhile(pred = !"\n".contains(_: Char), min = 0)
   lazy val textAsJArr = P(!(resetScopeMarker | scopeMarker | resetArrayMarker) ~ rawText).map(_ => JsArray.empty)
   lazy val anyText = P(rawText).map(_ => JsObject.empty)
 
-  lazy val kvLine: P[JsObject] =
-    P(ws ~ tokenPath ~ ws ~ ":" ~ ws ~ multilineStr).log("kvLine").map { case (p, v) => p.jsObj(JsString(v)) }
+  lazy val kToken = P(ws ~ tokenPath ~ ws ~ ":" ~ ws)
 
-  lazy val multilineStr = P(strChars.!.rep(sep = "\n\\", min = 0)).map(strSeq => strSeq.mkString("\n"))
+  lazy val kvLine: P[JsObject] =
+    P(kToken ~ (multiLineStr | singleLineStr))
+      .log("kvLine").map { case (p, v) => p.jsObj(JsString(v)) }
+
+  lazy val escapedLine: P[String] = P("\\" ~ strChars.!).log("esc")
+
+  lazy val singleLineStr = P(strChars.!)
+  lazy val multiLineStr = P(strChars.! ~ "\n" ~ (escapedLine | tle(markers | kToken).!).rep(0, "\n")
+    ~ "\n".? ~ (!"\\" ~ ":end"))
+    .log("ml").map { case (s1, strings) => (s1 +: strings).mkString("\n") }
 
   lazy val scope: P[JsObject] =
     P(ws ~ "{" ~ ws ~ tokenPath ~ ws ~ "}" ~ ws ~ "\n").log("scope").flatMap(scopeContent)
