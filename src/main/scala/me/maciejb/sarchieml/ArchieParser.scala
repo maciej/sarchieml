@@ -144,7 +144,7 @@ object ArchieParser extends CommonParsers {
 
   lazy val freeformArray = P(ws ~ "[+" ~ ws ~ tokenPath ~ ws ~ "]" ~ ws ~ "\n").log("freeformArray")
     .flatMap(freeformArrayContent)
-  def freeformArrayContent(p: Path) = P(("\n".? ~ (kvFfArrLine | textFfArrLine)).rep(0, "\n") ~ "\n".? ~
+  def freeformArrayContent(p: Path) = P((kvFfArrLine | textFfArrLine | Pass).rep(0, "\n") ~ "\n".? ~
     (resetArrayMarker | End)).map { lines =>
     val list = lines.foldLeft(List[JsObject]()) {
       case (acc, (k: String, v: String)) => JsObject("type" -> JsString(k), "value" -> JsString(v)) :: acc
