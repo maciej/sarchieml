@@ -21,6 +21,7 @@ pomExtra := (
       </developer>
     </developers>
   )
+releasePublishArtifactsAction := PgpKeys.publishSigned.value
 
 scalaVersion := "2.11.7"
 
