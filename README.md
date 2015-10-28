@@ -20,4 +20,5 @@ ArchiemlParser.parse("key: value")
 ## Resources
 * [Specification](http://archieml.org/spec/1.0/CR-20150509.html)
 * [Existing ArchieML Parsers](http://archieml.org/#resources)
+* [Code for Poland (S)ArchieML presentation](https://speakerdeck.com/maciejb/archieml)
 * [archieclj - ArchieML clojure parser](https://github.com/mihi-tr/archieclj)
