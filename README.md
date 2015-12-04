@@ -8,7 +8,7 @@ Uses [fastparse](http://lihaoyi.github.io/fastparse/) parser generator and produ
 ## Getting started
 In SBT add:
 ```scala
-libraryDependencies += "me.maciejb" %% "sarchieml" % "0.1.2"
+libraryDependencies += "me.maciejb.sarchieml" %% "sarchieml" % "0.1.2"
 ```
 
 ## Usage
